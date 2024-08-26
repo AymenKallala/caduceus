@@ -7,16 +7,19 @@ from functools import partial
 from typing import Optional, Tuple, Union
 
 import torch
-from mamba_ssm.modules.mamba_simple import Mamba, Block
+from mamba_ssm.modules.block import Block
+from mamba_ssm.modules.mamba_simple import Mamba
+from mamba_ssm.modules.mamba2 import Mamba2
 from torch import nn
 from torch.nn import functional as F
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutputWithNoAttention, MaskedLMOutput, SequenceClassifierOutput
 
 try:
-    from mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
+    from mamba_ssm.ops.triton.layer_norm import RMSNorm, layer_norm_fn, rms_norm_fn
 except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
+
 
 from .configuration_caduceus import CaduceusConfig
 from .modeling_rcps import RCPSAddNormWrapper, RCPSEmbedding, RCPSLMHead, RCPSMambaBlock
@@ -33,6 +36,7 @@ def create_block(
         bidirectional=True,
         bidirectional_strategy="add",
         bidirectional_weight_tie=True,
+        headdim = 1,
         rcps=False,
         device=None,
         dtype=None,
@@ -42,7 +46,7 @@ def create_block(
     Adapted from: https://github.com/state-spaces/mamba/blob/main/mamba_ssm/models/mixer_seq_simple.py
     """
     if ssm_cfg is None:
-        ssm_cfg = {}
+        ssm_cfg = {"headdim" : headdim}
     factory_kwargs = {"device": device, "dtype": dtype}
     bidirectional_kwargs = {
         "bidirectional": bidirectional,
@@ -83,12 +87,12 @@ class BiMambaWrapper(nn.Module):
             raise NotImplementedError(f"`{bidirectional_strategy}` strategy for bi-directionality is not implemented!")
         self.bidirectional = bidirectional
         self.bidirectional_strategy = bidirectional_strategy
-        self.mamba_fwd = Mamba(
+        self.mamba_fwd = Mamba2(
             d_model=d_model,
             **mamba_kwargs
         )
         if bidirectional:
-            self.mamba_rev = Mamba(
+            self.mamba_rev = Mamba2(
                 d_model=d_model,
                 **mamba_kwargs
             )
@@ -182,6 +186,7 @@ class CaduceusMixerModel(nn.Module):
                     bidirectional=config.bidirectional,
                     bidirectional_strategy=config.bidirectional_strategy,
                     bidirectional_weight_tie=config.bidirectional_weight_tie,
+                    headdim=config.headdim,
                     rcps=config.rcps,
                     **factory_kwargs,
                 )
